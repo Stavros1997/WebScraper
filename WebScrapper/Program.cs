@@ -35,6 +35,8 @@ class Program
                 driver.Navigate().GoToUrl("https://www.betsson.gr/el/stoixima/basket/evrolinka/evrolinka?tab=liveAndUpcoming");
                 Thread.Sleep(5000);
 
+                Screenshot screenshot = ((ITakesScreenshot)driver).GetScreenshot();
+                screenshot.SaveAsFile("screenshot.png");
                 try
                 {
                     ClickOnPopUpAndCookies(driver, wait, js);
