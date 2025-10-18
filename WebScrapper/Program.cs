@@ -16,15 +16,18 @@ class Program
     static void Main()
     {
         List<string> MatchesWithPlayerProps = new List<string>();
-        int PreviousPlayerPropsCount = -1;
+        List<string> PreviousPlayerPropsMatches = new List<string>();
+        List<string> MatchesToSendInEmail = new List<string>();
 
         while (true)
         {
+            Console.WriteLine("Starting loop...");
+            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss"));
             ChromeDriver? driver = null;
             try
             {
                 var options = new ChromeOptions();
-                options.AddArgument("--headless");
+                //options.AddArgument("--headless");
                 options.AddArgument("--no-sandbox");
                 options.AddArgument("--disable-gpu");
 
@@ -81,60 +84,51 @@ class Program
                     {
                         string Teams = teamNames[i];
                         elements[i].Click();
-                        Thread.Sleep(1000);
+                        Thread.Sleep(5000);
                         try
                         {
-                            bool exists = matTypography.FindElements(By.CssSelector("span.ng-star-inserted")).Any(e => e.Text.Trim() == "Αγορές παικτών");
+                            bool exists = matTypography.FindElements(By.CssSelector("span.ng-star-inserted")).Any(e => e.Text.Replace("\n", "").Replace("\r", "").Trim().Contains("Αγορές παικτών"));
                             if (exists)
+                            {
                                 MatchesWithPlayerProps.Add(Teams);
+                                CheckPlayers(matTypography,wait,driver);
+                            }
                         }
-                        catch
+                        catch(Exception ex)
                         {
-                            Console.WriteLine("❌ Element not found.");
+                            Console.WriteLine("❌ Element not found.", ex);
+                            driver.Navigate().Back();
+                            elements =ReloadElements(driver, js, wait, teamNames);
+                            //i--; // retry same index
+                            continue;
                         }
 
                         driver.Navigate().Back();
                         Thread.Sleep(1000);
                         ScrollDown(matTypography, js);
-                        matTypography = GetLastShadowDOM(wait);
-                        elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
-                        while (elements.Count != teamNames.Count)
-                        {
-                            driver.Navigate().Refresh();
-                            Thread.Sleep(10000);
-                            matTypography = GetLastShadowDOM(wait);
-                            ScrollDown(matTypography, js);
-                            elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
-                        }
+                        elements=ReloadElements(driver, js, wait, teamNames);
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"Exception {ex}, occured at {i}, refetching and retrying...");
-                        matTypography = GetLastShadowDOM(wait);
-                        elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
-                        while (elements.Count != teamNames.Count)
-                        {
-                            driver.Navigate().Refresh();
-                            Thread.Sleep(10000);
-                            matTypography = GetLastShadowDOM(wait);
-                            ScrollDown(matTypography, js);
-                            elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
-                        }
+                        elements = ReloadElements(driver, js, wait, teamNames);
                         i--; // retry same index
                     }
 
                     
 
                 }
-                if (PreviousPlayerPropsCount == MatchesWithPlayerProps.Count)
+                if (PreviousPlayerPropsMatches.Count == MatchesWithPlayerProps.Count)
                 {
                     //do not send an email if the count is the same as last time
 
                 }
                 else
                 {
-                    PreviousPlayerPropsCount = MatchesWithPlayerProps.Count;
-                    SendEmail(MatchesWithPlayerProps);
+                    MatchesToSendInEmail= MatchesWithPlayerProps.Except(PreviousPlayerPropsMatches).ToList();
+                    PreviousPlayerPropsMatches.Clear();
+                    PreviousPlayerPropsMatches.AddRange(MatchesWithPlayerProps);
+                    SendEmail(MatchesToSendInEmail);
                     
 
                 }
@@ -154,8 +148,75 @@ class Program
             }
 
             Console.WriteLine("⏳ Waiting 5 minutes before next run...");
-            //Thread.Sleep(300000); // wait 5 minutes
+            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss"));
+            Thread.Sleep(300000); // wait 5 minutes
         }
+    }
+
+    public static void CheckPlayers(IWebElement? matTypography, WebDriverWait? wait, ChromeDriver driver)
+    {
+        try
+        {
+            var targetElement = wait.Until(d =>
+            {
+                var spans = matTypography.FindElements(By.CssSelector("span.ng-star-inserted"));
+                return spans.FirstOrDefault(e =>
+                    e.Text.Replace("\n", "").Replace("\r", "").Trim().Contains("Αγορές παικτών"));
+            });
+
+            targetElement.Click();
+            Console.WriteLine(" Clicked 'Agores paiktwn' successfully!");
+            matTypography = GetLastShadowDOM(wait);
+            var allPlayersSpans = wait.Until(d =>
+            {
+                var spans = matTypography.FindElements(By.CssSelector("span.ng-star-inserted"));
+                var openallplayers = spans.Where(e =>
+                    e.Text.Replace("\n", "").Replace("\r", "").Trim().Contains("Προβολή όλων των παικτών")
+                ).ToList();
+
+                return openallplayers.Any() ? openallplayers : null; // return null so WebDriverWait keeps polling
+            });
+            
+            for(int i=0;i<allPlayersSpans.Count();i++)
+            {
+
+                try
+                {
+                    allPlayersSpans[i].Click();
+                }
+                catch
+                {
+                    matTypography = GetLastShadowDOM(wait);
+                }
+
+                Console.WriteLine($"➡️ Clicked: {span.Text}");
+                Thread.Sleep(1000); // wait for new content to load, if needed
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+        }
+    }
+
+    public static ReadOnlyCollection<IWebElement> ReloadElements(ChromeDriver driver, IJavaScriptExecutor js,WebDriverWait? wait,List<string>teamNames)
+    {
+        var matTypography = GetLastShadowDOM(wait);
+        var elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
+        while (elements.Count != teamNames.Count)
+        {
+            driver.Navigate().Refresh();
+            Thread.Sleep(15000);
+            matTypography = GetLastShadowDOM(wait);
+            ScrollDown(matTypography, js);
+            elements = matTypography.FindElements(By.CssSelector(".obg-event-scorecard-labels.event-table.ng-star-inserted"));
+            if (elements.Count == 0)
+            {
+                throw new Exception("No elements found after refresh");
+            }
+            
+        }
+        return elements;
     }
 
     public static void ClickOnPopUpAndCookies(ChromeDriver driver,WebDriverWait? wait,IJavaScriptExecutor js)
@@ -244,9 +305,9 @@ class Program
         string body = "Matches with Player Props:\n\n" + string.Join("\n", cleanedMatches);
 
         // Gmail sender credentials
-        string fromAddress = Environment.GetEnvironmentVariable("EMAIL_FROM_USER");
-        string fromPassword = Environment.GetEnvironmentVariable("EMAIL_PASS");
-        string toAddress = Environment.GetEnvironmentVariable("EMAIL_TO_USER");
+        string fromAddress = "stavros.pgs@gmail.com";
+        string fromPassword = "mfjp hzbc ecgj dhid";
+        string toAddress = "dimitrisbazoras@yahoo.gr";
 
         // 📬 Multiple recipients
         List<string> toAddresses = new List<string>
